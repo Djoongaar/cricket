@@ -33,8 +33,11 @@ class Cricket:
               144, 208, 36, 52, 203, 237, 244, 206, 153, 16, 68, 64, 146, 58, 1, 38,
               18, 26, 72, 104, 245, 129, 139, 199, 214, 32, 10, 8, 0, 76, 215, 116]
 
+    def __init__(self, key):
+        self.round_keys = self.__generate_round_keys(key)
+
     @staticmethod
-    def number_bits(x):
+    def __number_bits(x):
         nb = 0
         while x != 0:
             nb += 1
@@ -42,17 +45,17 @@ class Cricket:
         return nb
 
     @staticmethod
-    def mod_int_as_polynomial(x, m):
-        nbm = Cricket.number_bits(m)
+    def __mod_int_as_polynomial(x, m):
+        nbm = Cricket.__number_bits(m)
         while True:
-            nbx = Cricket.number_bits(x)
+            nbx = Cricket.__number_bits(x)
             if nbx < nbm:
                 return x
             mshift = m << (nbx - nbm)
             x ^= mshift
 
     @staticmethod
-    def multiply_ints_as_polynomials(x, y):
+    def __multiply_ints_as_polynomials(x, y):
         if x == 0 or y == 0:
             return 0
         z = 0
@@ -64,22 +67,22 @@ class Cricket:
         return z
 
     @staticmethod
-    def multiply(x, y):
-        z = Cricket.multiply_ints_as_polynomials(x, y)
+    def __multiply(x, y):
+        z = Cricket.__multiply_ints_as_polynomials(x, y)
         m = int('111000011', 2)
-        return Cricket.mod_int_as_polynomial(z, m)
+        return Cricket.__mod_int_as_polynomial(z, m)
 
     @staticmethod
-    def linear_function(x):
+    def __linear_function(x):
         c = [148, 32, 133, 16, 194, 192, 1, 251, 1, 192, 194, 16, 133, 32, 148, 1]
         y = 0
         while x != 0:
-            y ^= Cricket.multiply(x & 0xff, c.pop())
+            y ^= Cricket.__multiply(x & 0xff, c.pop())
             x >>= 8
         return y
 
     @staticmethod
-    def s_transformation(x):
+    def __s_transformation(x):
         y = 0
         for i in reversed(range(16)):
             y <<= 8
@@ -87,7 +90,7 @@ class Cricket:
         return y
 
     @staticmethod
-    def s_inv_transformation(x):
+    def __s_inv_transformation(x):
         y = 0
         for i in reversed(range(16)):
             y <<= 8
@@ -95,70 +98,83 @@ class Cricket:
         return y
 
     @staticmethod
-    def r_transformation(x):
-        a = Cricket.linear_function(x)
+    def __r_transformation(x):
+        a = Cricket.__linear_function(x)
         return (a << 8 * 15) ^ (x >> 8)
 
     @staticmethod
-    def r_inv_transformation(x):
+    def __r_inv_transformation(x):
         a = x >> 15 * 8
         x = (x << 8) & (2 ** 128 - 1)
-        b = Cricket.linear_function(x ^ a)
+        b = Cricket.__linear_function(x ^ a)
         return x ^ b
 
     @staticmethod
-    def l_transformation(x):
+    def __l_transformation(x):
         for _ in range(16):
-            x = Cricket.r_transformation(x)
+            x = Cricket.__r_transformation(x)
         return x
 
     @staticmethod
-    def l_inv_transformation(x):
+    def __l_inv_transformation(x):
         for _ in range(16):
-            x = Cricket.r_inv_transformation(x)
+            x = Cricket.__r_inv_transformation(x)
         return x
 
     @staticmethod
-    def generate_round_keys(key):
-        keys = []
+    def __generate_round_keys(key):
+        round_keys = []
         a = key >> 128
         b = key & (2 ** 128 - 1)
-        keys.append(a)
-        keys.append(b)
+        round_keys.append(a)
+        round_keys.append(b)
         for i in range(4):
             for j in range(8):
-                c = Cricket.l_transformation(8 * i + j + 1)
-                (a, b) = (Cricket.l_transformation(Cricket.s_transformation(a ^ c)) ^ b, a)
-            keys.append(a)
-            keys.append(b)
-        return keys
+                c = Cricket.__l_transformation(8 * i + j + 1)
+                (a, b) = (Cricket.__l_transformation(Cricket.__s_transformation(a ^ c)) ^ b, a)
+            round_keys.append(a)
+            round_keys.append(b)
+        return round_keys
 
-    @staticmethod
-    def encrypt(x, key):
-        keys = Cricket.generate_round_keys(key)
+    def encrypt(self, x):
         for rnd in range(9):
-            x = Cricket.l_transformation(Cricket.s_transformation(x ^ keys[rnd]))
-        return x ^ keys[-1]
+            x = Cricket.__l_transformation(Cricket.__s_transformation(x ^ self.round_keys[rnd]))
+        return x ^ self.round_keys[-1]
 
-    @staticmethod
-    def decrypt(x, key):
-        keys = Cricket.generate_round_keys(key)
-        keys.reverse()
+    def decrypt(self, x):
+        keys = self.round_keys[::-1]
         for rnd in range(9):
-            x = Cricket.s_inv_transformation(Cricket.l_inv_transformation(x ^ keys[rnd]))
+            x = Cricket.__s_inv_transformation(Cricket.__l_inv_transformation(x ^ keys[rnd]))
         return x ^ keys[-1]
 
 
 # plaintext
-PT = int('1122334455667700ffeeddccbbaa9988', 16)
+with open("test.txt", "rb") as file:
+    byte_array = bytearray(file.read())
+
 # key
 k = int('8899aabbccddeeff0011223344556677fedcba98765432100123456789abcdef', 16)
-r_keys = Cricket.generate_round_keys(key=k)
-# ciphertext
-CT = Cricket.encrypt(PT, k)
-print(hex(CT))
-# decrypted text
-DT = Cricket.decrypt(CT, k)
-print(hex(DT))
-# The plaintext should equal the decrypted text.
-print(PT == DT)
+cricket = Cricket(k)
+
+encrypted_text = bytearray()
+
+for i in range(len(byte_array) // 16):
+    byte = byte_array[i * 16:i * 16 + 16]
+    ct = cricket.encrypt(int.from_bytes(byte, byteorder='big', signed=False))
+    encrypted_text.extend(int.to_bytes(ct, 16, byteorder='big', signed=False))
+
+with open("encrypted.txt", "wb") as file:
+    file.write(encrypted_text)
+
+with open("encrypted.txt", "rb") as file:
+    byte_array = bytearray(file.read())
+
+decrypted_text = bytearray()
+
+for i in range(len(byte_array) // 16):
+    byte = byte_array[i * 16:i * 16 + 16]
+    dt = cricket.decrypt(int.from_bytes(byte, byteorder='big', signed=False))
+    decrypted_text.extend(int.to_bytes(dt, 16, byteorder='big', signed=False))
+
+with open("decrypted.txt", "wb") as file:
+    file.write(decrypted_text)
