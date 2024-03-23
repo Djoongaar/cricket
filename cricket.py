@@ -1,3 +1,7 @@
+import os
+from hashlib import md5
+
+
 class Cricket:
     pi = [252, 238, 221, 17, 207, 110, 49, 22, 251, 196, 250, 218, 35, 197, 4, 77,
           233, 119, 240, 219, 147, 46, 153, 186, 23, 54, 241, 187, 20, 205, 95, 193,
@@ -137,6 +141,7 @@ class Cricket:
         return round_keys
 
     def encrypt(self, x):
+        print("type: ", x)
         for rnd in range(9):
             x = Cricket.__l_transformation(Cricket.__s_transformation(x ^ self.round_keys[rnd]))
         return x ^ self.round_keys[-1]
@@ -148,38 +153,139 @@ class Cricket:
         return x ^ keys[-1]
 
 
-# plaintext
-with open("test.txt", "rb") as file:
-    byte_array = bytearray(file.read())
+class EncryptionMode:
+    @staticmethod
+    def __generate_initializing_value():
+        """
+        Генератор синхропосылки
+        :return:
+        """
+        return bytearray(os.urandom(8))
 
-# key
-k = int('8899aabbccddeeff0011223344556677fedcba98765432100123456789abcdef', 16)
-cricket = Cricket(k)
+    @staticmethod
+    def __padding_bytes(plain_bytes: bytearray):
+        """
+        Добавляет в конце открытого текста единицу, а затем
+        добивает нулями пока длинна массива не будет кратна 16
+        :param plain_bytes:
+        :return:
+        """
+        plain_bytes += b'\x01'
+        while len(plain_bytes) % 16 != 0:
+            plain_bytes += b'\x01'
+        return plain_bytes
 
-encrypted_text = bytearray()
+    @staticmethod
+    def ecb_mode(plain_bytes: bytearray):
+        """
+        Режим простой замены текста, при котором каждый блок открытого
+        текста меняется на блок шифротекста (Electronic Codebook)
+        :param plain_bytes: массив байтов исходного текста (блоки)
+        :return:
+        """
+        pass
 
-for i in range(len(byte_array) // 16):
-    byte = byte_array[i * 16:i * 16 + 16]
-    ct = cricket.encrypt(int.from_bytes(byte, byteorder='big', signed=False))
-    encrypted_text.extend(int.to_bytes(ct, 16, byteorder='big', signed=False))
+    @staticmethod
+    def ctr_mode():
+        """
+        Режим гаммирования (Counter mode). В режиме гаммирования базовый блочный шифр (в случае моей практической
+        работы это Кузнечик) не отвечает за шифрование открытого текста, а отвечает за выработку Гаммы
+        :return:
+        """
+        result = []
+        iv = EncryptionMode.__generate_initializing_value()
+        counter = iv + bytearray(8)
+        # ключ
+        key = int('8899aabbccddeeff0011223344556677fedcba98765432100123456789abcdef', 16)
+        cricket = Cricket(key)
+        # счетчик
+        counter_int = int.from_bytes(counter, byteorder='big', signed=False)
+        print(counter_int)
+        # первый блок шифр текста
+        c1 = cricket.encrypt(counter_int)
+        # обновляем счетчик
+        counter_int += 1
+        counter_int %= 2**128
+        print(counter_int)
+        counter = int.to_bytes(counter_int, 16, byteorder='big', signed=False)
+        print(counter)
 
-with open("encrypted.txt", "wb") as file:
-    file.write(encrypted_text)
+    @staticmethod
+    def ofb_mode(plain_bytes: bytearray):
+        """
+        Режим гаммирования с обратной связью по выходу
+        (Output feedback mode)
+        :param plain_bytes:
+        :return:
+        """
+        pass
 
-with open("encrypted.txt", "rb") as file:
-    byte_array = bytearray(file.read())
+    @staticmethod
+    def cbc_mode(plain_bytes: bytearray):
+        """
+        Режим простой замены с зацеплением
+        (Cipher block chaining mode)
+        :param plain_bytes:
+        :return:
+        """
+        pass
 
-decrypted_text = bytearray()
+    @staticmethod
+    def cfb_mode(plain_bytes: bytearray):
+        """
+        Режим гаммирования с обратной связью по шифртексту
+        (Cipher feedback mode)
+        :param plain_bytes:
+        :return:
+        """
+        pass
 
-for i in range(len(byte_array) // 16):
-    byte = byte_array[i * 16:i * 16 + 16]
-    dt = cricket.decrypt(int.from_bytes(byte, byteorder='big', signed=False))
-    decrypted_text.extend(int.to_bytes(dt, 16, byteorder='big', signed=False))
+    @staticmethod
+    def mac_mode(plain_bytes: bytearray):
+        """
+        Режим выработки имитовставки
+        (Message Authentication Code algorithm)
+        :param plain_bytes:
+        :return:
+        """
+        pass
 
-with open("decrypted.txt", "wb") as file:
-    file.write(decrypted_text)
 
-# TODO: Обработка случая не кратной 128 бит размера файла
+# # plaintext
+# with open("test.txt", "rb") as file:
+#     byte_array = bytearray(file.read())
+#
+# # key
+# k = int('8899aabbccddeeff0011223344556677fedcba98765432100123456789abcdef', 16)
+# cricket = Cricket(k)
+#
+# encrypted_text = bytearray()
+#
+# for i in range(len(byte_array) // 16):
+#     byte = byte_array[i * 16:i * 16 + 16]
+#     ct = cricket.encrypt(int.from_bytes(byte, byteorder='big', signed=False))
+#     encrypted_text.extend(int.to_bytes(ct, 16, byteorder='big', signed=False))
+#
+# with open("encrypted.txt", "wb") as file:
+#     file.write(encrypted_text)
+#
+# with open("encrypted.txt", "rb") as file:
+#     byte_array = bytearray(file.read())
+#
+# decrypted_text = bytearray()
+#
+# for i in range(len(byte_array) // 16):
+#     byte = byte_array[i * 16:i * 16 + 16]
+#     dt = cricket.decrypt(int.from_bytes(byte, byteorder='big', signed=False))
+#     decrypted_text.extend(int.to_bytes(dt, 16, byteorder='big', signed=False))
+#
+# with open("decrypted.txt", "wb") as file:
+#     file.write(decrypted_text)
+
+# TODO: Обработка случая не кратной 128 бит размера файла. Preprocessing text || 1 || 00000...
+# TODO: Синхропосылка. Выработать начальное значение для инициализации шифрования
 # TODO: Допилить файл как скрипт с приемкой аргументов encrypt и decrypt
 # TODO: Доделать режимы - хотя бы 2 штуки
 # TODO: Дописать раздел с выводами о проделанной работе в отчете
+
+EncryptionMode.ctr_mode()
