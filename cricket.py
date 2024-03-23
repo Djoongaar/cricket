@@ -178,3 +178,8 @@ for i in range(len(byte_array) // 16):
 
 with open("decrypted.txt", "wb") as file:
     file.write(decrypted_text)
+
+# TODO: Обработка случая не кратной 128 бит размера файла
+# TODO: Допилить файл как скрипт с приемкой аргументов encrypt и decrypt
+# TODO: Доделать режимы - хотя бы 2 штуки
+# TODO: Дописать раздел с выводами о проделанной работе в отчете
