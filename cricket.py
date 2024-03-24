@@ -127,6 +127,7 @@ class Cricket:
 
     @staticmethod
     def __generate_round_keys(key):
+        key = int(key, 16)
         round_keys = []
         a = key >> 128
         b = key & (2 ** 128 - 1)
@@ -141,7 +142,6 @@ class Cricket:
         return round_keys
 
     def encrypt(self, x):
-        print("type: ", x)
         for rnd in range(9):
             x = Cricket.__l_transformation(Cricket.__s_transformation(x ^ self.round_keys[rnd]))
         return x ^ self.round_keys[-1]
@@ -154,8 +154,11 @@ class Cricket:
 
 
 class EncryptionMode:
+    # TODO: Допилить файл как скрипт с приемкой аргументов encrypt и decrypt
+    # TODO: Доделать режимы - хотя бы 2 штуки
+    # TODO: Дописать раздел с выводами о проделанной работе в отчете
     @staticmethod
-    def __generate_initializing_value():
+    def __get_initializing_value():
         """
         Генератор синхропосылки
         :return:
@@ -163,7 +166,7 @@ class EncryptionMode:
         return bytearray(os.urandom(8))
 
     @staticmethod
-    def __padding_bytes(plain_bytes: bytearray):
+    def __padding_bytes(plain_bytes: bytearray, block_size: int) -> bytearray:
         """
         Добавляет в конце открытого текста единицу, а затем
         добивает нулями пока длинна массива не будет кратна 16
@@ -171,8 +174,11 @@ class EncryptionMode:
         :return:
         """
         plain_bytes += b'\x01'
-        while len(plain_bytes) % 16 != 0:
+        while len(plain_bytes) % block_size != 0:
             plain_bytes += b'\x01'
+
+        assert len(plain_bytes) % block_size == 0, "Размер массива текста не кратен размеру блока"
+
         return plain_bytes
 
     @staticmethod
@@ -186,29 +192,51 @@ class EncryptionMode:
         pass
 
     @staticmethod
-    def ctr_mode():
+    def __get_counter(iv):
+        return int.from_bytes(iv + bytearray(8), byteorder='big', signed=False)
+
+    @staticmethod
+    def __increment_counter(counter):
+        return (counter + 1) % 2**128
+
+    @staticmethod
+    def dummy_mode():
+        pass
+
+    @staticmethod
+    def ctr_mode(open_text: bytearray, key: str, block_size: int = 13):
         """
         Режим гаммирования (Counter mode). В режиме гаммирования базовый блочный шифр (в случае моей практической
         работы это Кузнечик) не отвечает за шифрование открытого текста, а отвечает за выработку Гаммы
         :return:
         """
-        result = []
-        iv = EncryptionMode.__generate_initializing_value()
-        counter = iv + bytearray(8)
-        # ключ
-        key = int('8899aabbccddeeff0011223344556677fedcba98765432100123456789abcdef', 16)
+        # Инициализируем массив для зашифрованных данных
+        encrypted_bytes = []
+
+        # Генерируем синхропосылку и счетчик
+        init_val = EncryptionMode.__get_initializing_value()
+        counter = EncryptionMode.__get_counter(init_val)
+
+        # Синхропосылка - это наш первый зашифрованный блок. Кладем его в массив
+        encrypted_bytes.append(init_val)
+
+        # Добавляем паддинги
+        open_text = EncryptionMode.__padding_bytes(open_text, block_size)
+
+        # Инициализируем объект класса Cricket
         cricket = Cricket(key)
-        # счетчик
-        counter_int = int.from_bytes(counter, byteorder='big', signed=False)
-        print(counter_int)
-        # первый блок шифр текста
-        c1 = cricket.encrypt(counter_int)
-        # обновляем счетчик
-        counter_int += 1
-        counter_int %= 2**128
-        print(counter_int)
-        counter = int.to_bytes(counter_int, 16, byteorder='big', signed=False)
-        print(counter)
+
+        # Запускаю цикл шифрования с учетом нового размера блока
+        for blk_ind in range(len(open_text) // block_size):
+            block = open_text[block_size * blk_ind: block_size * (blk_ind + 1)]
+            # первый блок шифр текста и усекаем блок до нового размера
+            gamma = cricket.encrypt(counter) >> block_size
+            # обновляем счетчик
+            counter = EncryptionMode.__increment_counter(counter)
+            # Накладываем усеченную гамму на блок открытого текста и добавляем в результат
+            encrypted_bytes.append(gamma ^ int.from_bytes(block, byteorder='big', signed=False))
+
+        return encrypted_bytes
 
     @staticmethod
     def ofb_mode(plain_bytes: bytearray):
@@ -251,41 +279,23 @@ class EncryptionMode:
         pass
 
 
-# # plaintext
-# with open("test.txt", "rb") as file:
-#     byte_array = bytearray(file.read())
-#
-# # key
-# k = int('8899aabbccddeeff0011223344556677fedcba98765432100123456789abcdef', 16)
-# cricket = Cricket(k)
-#
-# encrypted_text = bytearray()
-#
-# for i in range(len(byte_array) // 16):
-#     byte = byte_array[i * 16:i * 16 + 16]
-#     ct = cricket.encrypt(int.from_bytes(byte, byteorder='big', signed=False))
-#     encrypted_text.extend(int.to_bytes(ct, 16, byteorder='big', signed=False))
-#
-# with open("encrypted.txt", "wb") as file:
-#     file.write(encrypted_text)
-#
-# with open("encrypted.txt", "rb") as file:
-#     byte_array = bytearray(file.read())
-#
-# decrypted_text = bytearray()
-#
-# for i in range(len(byte_array) // 16):
-#     byte = byte_array[i * 16:i * 16 + 16]
-#     dt = cricket.decrypt(int.from_bytes(byte, byteorder='big', signed=False))
-#     decrypted_text.extend(int.to_bytes(dt, 16, byteorder='big', signed=False))
-#
-# with open("decrypted.txt", "wb") as file:
-#     file.write(decrypted_text)
+class Encryptor:
+    @staticmethod
+    def __read_file_as_binary(file_path: str) -> bytearray:
+        with open(file_path, "rb") as file:
+            open_text = bytearray(file.read())
+        return open_text
 
-# TODO: Обработка случая не кратной 128 бит размера файла. Preprocessing text || 1 || 00000...
-# TODO: Синхропосылка. Выработать начальное значение для инициализации шифрования
-# TODO: Допилить файл как скрипт с приемкой аргументов encrypt и decrypt
-# TODO: Доделать режимы - хотя бы 2 штуки
-# TODO: Дописать раздел с выводами о проделанной работе в отчете
+    @staticmethod
+    def encrypt(mode, file_path, key):
+        modes = {
+            "control": "EncryptionMode.ctr_mode",
+            "simple": "EncryptionMode.dummy_mode"
+        }
+        assert modes.get(mode) is not None, "Данный режим не существует"
 
-EncryptionMode.ctr_mode()
+        # Загружаем открытый текст
+        open_text = Encryptor.__read_file_as_binary(file_path)
+
+
+Encryptor.encrypt("control", "test.txt", "8899aabbccddeeff0011223344556677fedcba98765432100123456789abcdef")
