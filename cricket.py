@@ -1,5 +1,6 @@
+#!/usr/bin/env python3
 import os
-from hashlib import md5
+import sys
 
 
 class Cricket:
@@ -154,9 +155,6 @@ class Cricket:
 
 
 class EncryptionMode:
-    # TODO: Допилить файл как скрипт с приемкой аргументов encrypt и decrypt
-    # TODO: Доделать режимы - хотя бы 2 штуки
-    # TODO: Дописать раздел с выводами о проделанной работе в отчете
     @staticmethod
     def __get_initializing_value():
         """
@@ -175,21 +173,11 @@ class EncryptionMode:
         """
         plain_bytes += b'\x01'
         while len(plain_bytes) % block_size != 0:
-            plain_bytes += b'\x01'
+            plain_bytes += b'\x00'
 
         assert len(plain_bytes) % block_size == 0, "Размер массива текста не кратен размеру блока"
 
         return plain_bytes
-
-    @staticmethod
-    def ecb_mode(plain_bytes: bytearray):
-        """
-        Режим простой замены текста, при котором каждый блок открытого
-        текста меняется на блок шифротекста (Electronic Codebook)
-        :param plain_bytes: массив байтов исходного текста (блоки)
-        :return:
-        """
-        pass
 
     @staticmethod
     def __get_counter(iv):
@@ -200,43 +188,84 @@ class EncryptionMode:
         return (counter + 1) % 2**128
 
     @staticmethod
-    def dummy_mode():
-        pass
+    def ecb_mode(byte_text: bytearray, key: str, operator: str, block_size: int = 16):
+        """
+        Режим простой замены текста, при котором каждый блок открытого
+        текста меняется на блок шифротекста (Electronic Codebook)
+        :param byte_text: массив байтов исходного текста (блоки)
+        :param key:
+        :param operator:
+        :param block_size:
+        :return:
+        """
+        # Размер блока всегда равен длине раундового ключа
+        block_size = 16
+        # Инициализируем массив для зашифрованных данных
+        result_bytes = bytearray()
+        # Инициализируем объект класса Cricket
+        cricket = Cricket(key)
+
+        if operator == "encrypt":
+            byte_text = EncryptionMode.__padding_bytes(byte_text, block_size)
+
+        # Запускаю цикл шифрования с учетом нового размера блока
+        for blk_ind in range(len(byte_text) // block_size):
+            block = byte_text[block_size * blk_ind: block_size * (blk_ind + 1)]
+            block = int.from_bytes(block, byteorder='big', signed=False)
+            # берем счетчик, шифруем кузнечиком и усекаем блок до нового размера
+            if operator == "encrypt":
+                block = int.to_bytes(cricket.encrypt(block), block_size, byteorder='big')
+            else:
+                block = int.to_bytes(cricket.decrypt(block), block_size, byteorder='big')
+            result_bytes.extend(block)
+
+        return result_bytes
 
     @staticmethod
-    def ctr_mode(open_text: bytearray, key: str, block_size: int = 13):
+    def ctr_mode(byte_text: bytearray, key: str, operator: str, block_size: int = 13):
         """
         Режим гаммирования (Counter mode). В режиме гаммирования базовый блочный шифр (в случае моей практической
         работы это Кузнечик) не отвечает за шифрование открытого текста, а отвечает за выработку Гаммы
-        :return:
         """
         # Инициализируем массив для зашифрованных данных
-        encrypted_bytes = []
+        result_bytes = bytearray()
 
-        # Генерируем синхропосылку и счетчик
-        init_val = EncryptionMode.__get_initializing_value()
-        counter = EncryptionMode.__get_counter(init_val)
+        init_val = None
 
         # Синхропосылка - это наш первый зашифрованный блок. Кладем его в массив
-        encrypted_bytes.append(init_val)
+        if operator == "encrypt":
+            # Генерируем синхропосылку и счетчик
+            init_val = EncryptionMode.__get_initializing_value()
+            # Добавляем синхропосылку в результат работ
+            result_bytes.extend(init_val)
+            # Добавляем паддинги
+            byte_text = EncryptionMode.__padding_bytes(byte_text, block_size)
 
-        # Добавляем паддинги
-        open_text = EncryptionMode.__padding_bytes(open_text, block_size)
+        if operator == "decrypt":
+            # Или получаем синхропосылку и зашифрованный текст из зашифрованных данных
+            init_val, byte_text = byte_text[:8], byte_text[8:]
+
+        # Определяем счетчик
+        counter = EncryptionMode.__get_counter(init_val)
 
         # Инициализируем объект класса Cricket
         cricket = Cricket(key)
 
         # Запускаю цикл шифрования с учетом нового размера блока
-        for blk_ind in range(len(open_text) // block_size):
-            block = open_text[block_size * blk_ind: block_size * (blk_ind + 1)]
-            # первый блок шифр текста и усекаем блок до нового размера
-            gamma = cricket.encrypt(counter) >> block_size
+        for blk_ind in range(len(byte_text) // block_size):
+            block = byte_text[block_size * blk_ind: block_size * (blk_ind + 1)]
+            # берем счетчик, шифруем кузнечиком и усекаем блок до нового размера
+            right_shift = 128 - block_size * 8
+            gamma = cricket.encrypt(counter) >> right_shift
             # обновляем счетчик
             counter = EncryptionMode.__increment_counter(counter)
+            block_int = int.from_bytes(block, byteorder='big', signed=False)
             # Накладываем усеченную гамму на блок открытого текста и добавляем в результат
-            encrypted_bytes.append(gamma ^ int.from_bytes(block, byteorder='big', signed=False))
+            encrypted_block = gamma ^ block_int
+            encrypted_block = int.to_bytes(encrypted_block, block_size, byteorder='big')
+            result_bytes.extend(encrypted_block)
 
-        return encrypted_bytes
+        return result_bytes
 
     @staticmethod
     def ofb_mode(plain_bytes: bytearray):
@@ -280,6 +309,11 @@ class EncryptionMode:
 
 
 class Encryptor:
+    modes = {
+        "--control": EncryptionMode.ctr_mode,
+        "--dummy": EncryptionMode.ecb_mode
+    }
+
     @staticmethod
     def __read_file_as_binary(file_path: str) -> bytearray:
         with open(file_path, "rb") as file:
@@ -287,15 +321,61 @@ class Encryptor:
         return open_text
 
     @staticmethod
+    def __write_file_as_binary(file_path: str, encrypted_bin: bytearray) -> None:
+        with open(file_path, "wb") as file:
+            file.write(encrypted_bin)
+
+    @staticmethod
+    def __cut_paddings(plain_bytes: bytearray) -> bytearray:
+        for ind, _ in enumerate(plain_bytes[::-1]):
+            if _ == 1:
+                return plain_bytes[:-ind-1]
+
+        return plain_bytes
+
+    @staticmethod
     def encrypt(mode, file_path, key):
-        modes = {
-            "control": "EncryptionMode.ctr_mode",
-            "simple": "EncryptionMode.dummy_mode"
-        }
-        assert modes.get(mode) is not None, "Данный режим не существует"
+
+        assert Encryptor.modes.get(mode) is not None, "Данный режим не существует"
 
         # Загружаем открытый текст
         open_text = Encryptor.__read_file_as_binary(file_path)
 
+        # Запускаем шифрование в нужном режиме
+        encrypted_text = Encryptor.modes[mode](open_text, key, Encryptor.encrypt.__name__)
 
-Encryptor.encrypt("control", "test.txt", "8899aabbccddeeff0011223344556677fedcba98765432100123456789abcdef")
+        # Записываем файл
+        file_path = "{}{}".format(file_path, ".cricket")
+        Encryptor.__write_file_as_binary(file_path, encrypted_text)
+
+    @staticmethod
+    def decrypt(mode_name, file, key):
+
+        assert Encryptor.modes.get(mode_name) is not None, "Данный режим не существует"
+
+        # Загружаем зашифрованный текст
+        assert file.endswith(".cricket"), "Расширение файла не соответствует требуемому формату"
+        encrypted_text = Encryptor.__read_file_as_binary(file)
+
+        # Запускаем расшифрование в нужном режиме
+        decrypted_text = Encryptor.modes[mode_name](encrypted_text, key, Encryptor.decrypt.__name__)
+
+        # Отсекаем паддинги в конце массива
+        decrypted_text = Encryptor.__cut_paddings(decrypted_text)
+
+        # Записываем файл
+        file = "".join(file.strip().split(".cricket")[:-1]) + ".decrypted"
+        Encryptor.__write_file_as_binary(file, decrypted_text)
+
+
+if __name__ == "__main__":
+    assert len(sys.argv) == 5, "Не верное количество параметров при вызове скрипта cricket.py. Должно быть 5"
+    assert sys.argv[1] in ["--encrypt", "--decrypt"], "Не указана (не верно указана) команда для скрипта шифрования"
+    assert sys.argv[2] in ["--dummy", "--control"], "Не указан (не верно указан) режим работы блочного шифра"
+
+    operation, mode, file_path, secret_key = sys.argv[1:]
+
+    if operation == "--encrypt":
+        Encryptor.encrypt(mode, file_path, secret_key)
+    elif operation == "--decrypt":
+        Encryptor.decrypt(mode, file_path, secret_key)
