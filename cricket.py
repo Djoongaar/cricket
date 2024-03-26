@@ -156,12 +156,13 @@ class Cricket:
 
 class EncryptionMode:
     @staticmethod
-    def __get_initializing_value():
+    def __get_initializing_value(n: int) -> bytearray:
         """
         Генератор синхропосылки
-        :return:
+        :param: n: int: Размер синхропосылки в байтах
+        :return: bytearray
         """
-        return bytearray(os.urandom(8))
+        return bytearray(os.urandom(n))
 
     @staticmethod
     def __padding_bytes(plain_bytes: bytearray, block_size: int) -> bytearray:
@@ -185,7 +186,7 @@ class EncryptionMode:
 
     @staticmethod
     def __increment_counter(counter):
-        return (counter + 1) % 2**128
+        return (counter + 1) % 2 ** 128
 
     @staticmethod
     def ecb_mode(byte_text: bytearray, key: str, operator: str, block_size: int = 16):
@@ -227,15 +228,21 @@ class EncryptionMode:
         Режим гаммирования (Counter mode). В режиме гаммирования базовый блочный шифр (в случае моей практической
         работы это Кузнечик) не отвечает за шифрование открытого текста, а отвечает за выработку Гаммы
         """
+        # Тесты параметров на входе
+        assert operator in ["encrypt", "decrypt"], "Данная операция {} не поддерживается в данной реализации".format(
+            operator)
+
         # Инициализируем массив для зашифрованных данных
         result_bytes = bytearray()
 
+        # Определим размер синхропосылки (стандартный для этиого режима)
+        init_val_size = 8
         init_val = None
 
         # Синхропосылка - это наш первый зашифрованный блок. Кладем его в массив
         if operator == "encrypt":
-            # Генерируем синхропосылку и счетчик
-            init_val = EncryptionMode.__get_initializing_value()
+            # Генерируем синхропосылку
+            init_val = EncryptionMode.__get_initializing_value(init_val_size)
             # Добавляем синхропосылку в результат работ
             result_bytes.extend(init_val)
             # Добавляем паддинги
@@ -243,7 +250,7 @@ class EncryptionMode:
 
         if operator == "decrypt":
             # Или получаем синхропосылку и зашифрованный текст из зашифрованных данных
-            init_val, byte_text = byte_text[:8], byte_text[8:]
+            init_val, byte_text = byte_text[:init_val_size], byte_text[init_val_size:]
 
         # Определяем счетчик
         counter = EncryptionMode.__get_counter(init_val)
@@ -257,25 +264,79 @@ class EncryptionMode:
             # берем счетчик, шифруем кузнечиком и усекаем блок до нового размера
             right_shift = 128 - block_size * 8
             gamma = cricket.encrypt(counter) >> right_shift
-            # обновляем счетчик
-            counter = EncryptionMode.__increment_counter(counter)
-            block_int = int.from_bytes(block, byteorder='big', signed=False)
             # Накладываем усеченную гамму на блок открытого текста и добавляем в результат
+            block_int = int.from_bytes(block, byteorder='big', signed=False)
             encrypted_block = gamma ^ block_int
             encrypted_block = int.to_bytes(encrypted_block, block_size, byteorder='big')
             result_bytes.extend(encrypted_block)
+            # обновляем счетчик
+            counter = EncryptionMode.__increment_counter(counter)
 
         return result_bytes
 
     @staticmethod
-    def ofb_mode(plain_bytes: bytearray):
+    def ofb_mode(byte_text: bytearray, key: str, operator: str, block_size: int = 13, m_value: int = 48):
         """
         Режим гаммирования с обратной связью по выходу
         (Output feedback mode)
-        :param plain_bytes:
+        :param byte_text:
+        :param key:
+        :param m_value: Размер сдвигового блочного регистра. По умеолчанию я установил 48 (16 * 3)
+        :param operator: Может принимать значения только encrypt / decrypt (зашифровываем / расшифровываем)
+        :param block_size: Размер блока после усечения
         :return:
         """
-        pass
+        # Тесты параметров на входе
+        assert operator in ["encrypt", "decrypt"], "Данная операция {} не поддерживается в данной реализации".format(
+            operator)
+
+        # Инициализируем массив для зашифрованных данных
+        result_bytes = bytearray()
+
+        # Синхропосылка
+        init_val = None
+
+        if operator == "encrypt":
+            # Генерируем синхропосылку
+            init_val = EncryptionMode.__get_initializing_value(m_value)
+            # Добавляем синхропосылку в результат работ
+            result_bytes.extend(init_val)
+            # Добавляем паддинги
+            byte_text = EncryptionMode.__padding_bytes(byte_text, block_size)
+
+        if operator == "decrypt":
+            # Или получаем синхропосылку и зашифрованный текст из зашифрованных данных
+            init_val, byte_text = byte_text[:m_value], byte_text[m_value:]
+
+        init_val = int.from_bytes(init_val, byteorder="big", signed=False)
+
+        # Инициализируем объект класса Cricket
+        cricket = Cricket(key)
+
+        for blk_ind in range(len(byte_text) // block_size):
+            # Определяем счетчик
+            counter = init_val >> (m_value - 16) * 8
+            counter_rest = int.from_bytes(int.to_bytes(init_val, m_value, byteorder="big", signed=False)[16:], byteorder="big", signed=False)
+            # Определяем блок
+            block = byte_text[block_size * blk_ind: block_size * (blk_ind + 1)]
+            # берем счетчик, шифруем кузнечиком и усекаем блок до нового размера
+            right_shift = 128 - block_size * 8
+            gamma = cricket.encrypt(counter)
+            gamma_cut = gamma >> right_shift
+            # Накладываем усеченную гамму на блок открытого текста и добавляем в результат
+            block_int = int.from_bytes(block, byteorder='big', signed=False)
+            encrypted_block = gamma_cut ^ block_int
+            encrypted_block = int.to_bytes(encrypted_block, block_size, byteorder='big')
+            result_bytes.extend(encrypted_block)
+            # переопределяем сдвиговый регистр и записываем в переменную синхропосылки
+            init_val = int.from_bytes(
+                int.to_bytes(counter_rest, m_value - 16, byteorder='big', signed=False) +
+                int.to_bytes(gamma, 16, byteorder='big', signed=False),
+                byteorder='big',
+                signed=False
+            )
+
+        return result_bytes
 
     @staticmethod
     def cbc_mode(plain_bytes: bytearray):
@@ -310,7 +371,8 @@ class EncryptionMode:
 
 class Encryptor:
     modes = {
-        "--control": EncryptionMode.ctr_mode,
+        "--ctr_mode": EncryptionMode.ctr_mode,
+        "--ofb_mode": EncryptionMode.ofb_mode,
         "--dummy": EncryptionMode.ecb_mode
     }
 
@@ -329,7 +391,7 @@ class Encryptor:
     def __cut_paddings(plain_bytes: bytearray) -> bytearray:
         for ind, _ in enumerate(plain_bytes[::-1]):
             if _ == 1:
-                return plain_bytes[:-ind-1]
+                return plain_bytes[:-ind - 1]
 
         return plain_bytes
 
@@ -369,9 +431,12 @@ class Encryptor:
 
 
 if __name__ == "__main__":
-    assert len(sys.argv) == 5, "Не верное количество параметров при вызове скрипта cricket.py. Должно быть 5"
-    assert sys.argv[1] in ["--encrypt", "--decrypt"], "Не указана (не верно указана) команда для скрипта шифрования"
-    assert sys.argv[2] in ["--dummy", "--control"], "Не указан (не верно указан) режим работы блочного шифра"
+    assert len(sys.argv) == 5, \
+        "Не верное количество параметров при вызове скрипта cricket.py. Должно быть 5"
+    assert sys.argv[1] in ["--encrypt", "--decrypt"], \
+        "Не указана (не верно указана) команда для скрипта шифрования"
+    assert sys.argv[2] in ["--dummy", "--ctr_mode", "--ofb_mode"], \
+        "Не указан (не верно указан) режим работы блочного шифра"
 
     operation, mode, file_path, secret_key = sys.argv[1:]
 
