@@ -189,6 +189,12 @@ class EncryptionMode:
         return (counter + 1) % 2 ** 128
 
     @staticmethod
+    def __validate_operator(operator):
+        # Тесты параметров на входе
+        assert operator in ["encrypt", "decrypt"], "Данная операция {} не поддерживается в данной реализации".format(
+            operator)
+
+    @staticmethod
     def ecb_mode(byte_text: bytearray, key: str, operator: str, block_size: int = 16):
         """
         Режим простой замены текста, при котором каждый блок открытого
@@ -200,8 +206,7 @@ class EncryptionMode:
         :return:
         """
         # Тесты параметров на входе
-        assert operator in ["encrypt", "decrypt"], "Данная операция {} не поддерживается в данной реализации".format(
-            operator)
+        EncryptionMode.__validate_operator(operator)
 
         # Размер блока всегда равен длине раундового ключа
         block_size = 16
@@ -227,14 +232,66 @@ class EncryptionMode:
         return result_bytes
 
     @staticmethod
-    def cbc_mode(plain_bytes: bytearray):
+    def cbc_mode(byte_text: bytearray, key: str, operator: str, block_size: int = 16, m_value: int = 32):
         """
         Режим простой замены с зацеплением
         (Cipher block chaining mode)
-        :param plain_bytes:
+        :param m_value: Размер сдвигового регистра
+        :param block_size: Размер блока всегда 16
+        :param operator: encrypt / decrypt
+        :param key: str
+        :param byte_text: bytearray
         :return:
         """
-        pass
+        # Тесты параметров на входе
+        EncryptionMode.__validate_operator(operator)
+
+        # Инициализируем массив для зашифрованных данных
+        result_bytes = bytearray()
+
+        # Определим размер синхропосылки (стандартный для этиого режима)
+        block_size = 16  # В данном режиме всегда равен 16
+        init_val_size = m_value
+        init_val = None
+
+        if operator == "encrypt":
+            # Генерируем синхропосылку
+            init_val = EncryptionMode.__get_initializing_value(init_val_size)
+            # Добавляем синхропосылку в результат работ
+            result_bytes.extend(init_val)
+            # Добавляем паддинги
+            byte_text = EncryptionMode.__padding_bytes(byte_text, block_size)
+
+        if operator == "decrypt":
+            # Или получаем синхропосылку и зашифрованный текст из зашифрованных данных
+            init_val, byte_text = byte_text[:init_val_size], byte_text[init_val_size:]
+
+        # Инициализируем объект класса Cricket
+        cricket = Cricket(key)
+        # Запускаю цикл шифрования с учетом нового размера блока
+        for blk_ind in range(len(byte_text) // block_size):
+            # Определяем блок открытого текста
+            block = byte_text[block_size * blk_ind: block_size * (blk_ind + 1)]
+
+            # Назовем гаммой первые n бит синхропосылки
+            gamma = int.from_bytes(init_val[:block_size], byteorder="big", signed=False)
+
+            if operator == "encrypt":
+                encrypted_block = cricket.encrypt(gamma ^ int.from_bytes(block, byteorder="big", signed=False))
+                encrypted_block = int.to_bytes(encrypted_block, block_size, byteorder="big", signed=False)
+            else:
+                encrypted_block = cricket.decrypt(int.from_bytes(block, byteorder="big", signed=False))
+                encrypted_block = int.to_bytes(gamma ^ encrypted_block, block_size, byteorder="big", signed=False)
+
+            result_bytes.extend(encrypted_block)
+            # переопределяем сдвиговый регистр и записываем в переменную синхропосылки
+            if operator == "decrypt":
+                # Если расшифровываем, то добавлять в регистр блок шифртекста
+                encrypted_block = block
+            # Переопределяем сдвиговый регистр
+            init_val = init_val[block_size:] + encrypted_block
+
+        return result_bytes
 
     @staticmethod
     def ctr_mode(byte_text: bytearray, key: str, operator: str, block_size: int = 13):
@@ -243,8 +300,7 @@ class EncryptionMode:
         работы это Кузнечик) не отвечает за шифрование открытого текста, а отвечает за выработку Гаммы
         """
         # Тесты параметров на входе
-        assert operator in ["encrypt", "decrypt"], "Данная операция {} не поддерживается в данной реализации".format(
-            operator)
+        EncryptionMode.__validate_operator(operator)
 
         # Инициализируем массив для зашифрованных данных
         result_bytes = bytearray()
@@ -295,14 +351,13 @@ class EncryptionMode:
         (Output feedback mode)
         :param byte_text:
         :param key:
-        :param m_value: Размер сдвигового блочного регистра. По умеолчанию я установил 48 (16 * 3)
+        :param m_value: Размер сдвигового блочного регистра. По умеолчанию я установил 32 (16 * 2)
         :param operator: Может принимать значения только encrypt / decrypt (зашифровываем / расшифровываем)
         :param block_size: Размер блока после усечения
         :return:
         """
         # Тесты параметров на входе
-        assert operator in ["encrypt", "decrypt"], "Данная операция {} не поддерживается в данной реализации".format(
-            operator)
+        EncryptionMode.__validate_operator(operator)
 
         # Инициализируем массив для зашифрованных данных
         result_bytes = bytearray()
@@ -353,7 +408,7 @@ class EncryptionMode:
         return result_bytes
 
     @staticmethod
-    def cfb_mode(byte_text: bytearray, key: str, operator: str, block_size: int = 16, m_value: int = 64):
+    def cfb_mode(byte_text: bytearray, key: str, operator: str, block_size: int = 16, m_value: int = 32):
         """
         Режим гаммирования с обратной связью по шифртексту
         (Cipher feedback mode)
@@ -365,8 +420,7 @@ class EncryptionMode:
         :return:
         """
         # Тесты параметров на входе
-        assert operator in ["encrypt", "decrypt"], "Данная операция {} не поддерживается в данной реализации".format(
-            operator)
+        EncryptionMode.__validate_operator(operator)
 
         # Инициализируем массив для зашифрованных данных
         result_bytes = bytearray()
@@ -408,9 +462,7 @@ class EncryptionMode:
 
             # переопределяем сдвиговый регистр и записываем в переменную синхропосылки
             if operator == "decrypt":
-                # Вот о том что в этом режиме расшифрование отличается от зашифрования,
-                # Олег Олегович на лекции не упомянул и я два часа бился и искал баги =(
-                # А нужно было всего-то вот так переопределить переменную =)
+                # Если расшифровываем, то добавлять в регистр блок шифртекста
                 encrypted_block = block
 
             init_val = int.from_bytes(
@@ -422,21 +474,12 @@ class EncryptionMode:
 
         return result_bytes
 
-    @staticmethod
-    def mac_mode(plain_bytes: bytearray):
-        """
-        Режим выработки имитовставки
-        (Message Authentication Code algorithm)
-        :param plain_bytes:
-        :return:
-        """
-        pass
-
 
 class Encryptor:
     modes = {
         "--ctr_mode": EncryptionMode.ctr_mode,
         "--ofb_mode": EncryptionMode.ofb_mode,
+        "--cbc_mode": EncryptionMode.cbc_mode,
         "--cfb_mode": EncryptionMode.cfb_mode,
         "--dummy": EncryptionMode.ecb_mode
     }
@@ -500,12 +543,7 @@ if __name__ == "__main__":
         "Не верное количество параметров при вызове скрипта cricket.py. Должно быть 5"
     assert sys.argv[1] in ["--encrypt", "--decrypt"], \
         "Не указана (не верно указана) команда для скрипта шифрования"
-    assert sys.argv[2] in [
-        "--dummy",
-        "--ctr_mode",
-        "--ofb_mode",
-        "--cfb_mode"
-    ], \
+    assert sys.argv[2] in Encryptor.modes.keys(), \
         "Не указан (не верно указан) режим работы блочного шифра"
 
     operation, mode, file_path, secret_key = sys.argv[1:]
